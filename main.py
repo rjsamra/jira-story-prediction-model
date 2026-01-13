@@ -34,41 +34,74 @@ def load_model():
     """
     Load the trained model and preprocessing components.
     Tries to load from jira_model.pkl first, then falls back to saved_models/ directory.
+    Uses absolute paths based on the script's directory to avoid path issues.
     """
     global model_data
 
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
     # Try loading from single file first
-    if os.path.exists("jira_model.pkl"):
-        with open("jira_model.pkl", "rb") as f:
-            model_data = pickle.load(f)
-        return model_data
+    jira_model_path = os.path.join(script_dir, "jira_model.pkl")
+    if os.path.exists(jira_model_path):
+        try:
+            with open(jira_model_path, "rb") as f:
+                model_data = pickle.load(f)
+            # Validate that model_data has the expected structure
+            if isinstance(model_data, dict) and all(
+                key in model_data
+                for key in ["model", "scaler", "label_encoders", "feature_columns"]
+            ):
+                print(f"✓ Loaded model from {jira_model_path}")
+                return model_data
+            else:
+                print(
+                    "⚠ jira_model.pkl exists but has unexpected structure, trying saved_models/"
+                )
+        except Exception as e:
+            print(f"⚠ Error loading jira_model.pkl: {e}, trying saved_models/")
 
     # Try loading from saved_models directory
-    saved_models_dir = "saved_models"
-    if os.path.exists(os.path.join(saved_models_dir, "best_model.pkl")):
-        with open(os.path.join(saved_models_dir, "best_model.pkl"), "rb") as f:
-            model = pickle.load(f)
+    saved_models_dir = os.path.join(script_dir, "saved_models")
+    best_model_path = os.path.join(saved_models_dir, "best_model.pkl")
 
-        with open(os.path.join(saved_models_dir, "scaler.pkl"), "rb") as f:
-            scaler = pickle.load(f)
+    if os.path.exists(best_model_path):
+        try:
+            with open(best_model_path, "rb") as f:
+                model = pickle.load(f)
 
-        with open(os.path.join(saved_models_dir, "label_encoders.pkl"), "rb") as f:
-            label_encoders = pickle.load(f)
+            scaler_path = os.path.join(saved_models_dir, "scaler.pkl")
+            with open(scaler_path, "rb") as f:
+                scaler = pickle.load(f)
 
-        with open(os.path.join(saved_models_dir, "feature_columns.pkl"), "rb") as f:
-            feature_columns = pickle.load(f)
+            label_encoders_path = os.path.join(saved_models_dir, "label_encoders.pkl")
+            with open(label_encoders_path, "rb") as f:
+                label_encoders = pickle.load(f)
 
-        model_data = {
-            "model": model,
-            "scaler": scaler,
-            "label_encoders": label_encoders,
-            "feature_columns": feature_columns,
-        }
-        return model_data
+            feature_columns_path = os.path.join(saved_models_dir, "feature_columns.pkl")
+            with open(feature_columns_path, "rb") as f:
+                feature_columns = pickle.load(f)
 
+            model_data = {
+                "model": model,
+                "scaler": scaler,
+                "label_encoders": label_encoders,
+                "feature_columns": feature_columns,
+            }
+            print(f"✓ Loaded model from {saved_models_dir}/")
+            return model_data
+        except Exception as e:
+            raise FileNotFoundError(
+                f"Model files found in saved_models/ but error loading them: {e}"
+            )
+
+    # If we get here, no model files were found
     raise FileNotFoundError(
-        "Model files not found. Please ensure either 'jira_model.pkl' exists "
-        "or 'saved_models/' directory contains the required model files."
+        f"Model files not found. Checked:\n"
+        f"  - {jira_model_path}\n"
+        f"  - {saved_models_dir}/\n"
+        f"Please ensure either 'jira_model.pkl' exists in the script directory "
+        f"or 'saved_models/' directory contains the required model files."
     )
 
 
@@ -78,9 +111,15 @@ async def lifespan(app: FastAPI):
     try:
         load_model()
         print("✓ Model loaded successfully")
+        print(f"  Current working directory: {os.getcwd()}")
+        print(f"  Script directory: {os.path.dirname(os.path.abspath(__file__))}")
     except Exception as e:
-        print(f"✗ Error loading model: {e}")
-        raise
+        error_msg = f"✗ Error loading model: {e}"
+        print(error_msg)
+        import traceback
+
+        traceback.print_exc()
+        raise RuntimeError(f"Failed to load model during startup: {e}") from e
     yield
     # Cleanup on shutdown (if needed)
     pass

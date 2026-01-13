@@ -16,6 +16,20 @@ from contextlib import asynccontextmanager
 model_data = None
 
 
+def to_dict(pydantic_model):
+    """
+    Convert Pydantic model to dict, compatible with both v1 and v2.
+    In Pydantic v1, use .dict(), in v2 use .model_dump().
+    """
+    if hasattr(pydantic_model, "model_dump"):
+        return pydantic_model.model_dump()
+    elif hasattr(pydantic_model, "dict"):
+        return pydantic_model.dict()
+    else:
+        # Fallback: try to convert manually
+        return dict(pydantic_model)
+
+
 def load_model():
     """
     Load the trained model and preprocessing components.
@@ -352,7 +366,7 @@ async def predict(issue: IssueInput):
         PredictionResponse with predicted hours
     """
     try:
-        predicted_hours = predict_effort(issue.model_dump())
+        predicted_hours = predict_effort(to_dict(issue))
         return PredictionResponse(predicted_hours=predicted_hours)
     except HTTPException:
         raise
@@ -425,7 +439,7 @@ async def predict_batch(request: Request):
             try:
                 # Validate using Pydantic and convert to dict
                 validated = IssueInput(**item)
-                issues_data.append(validated.model_dump())
+                issues_data.append(to_dict(validated))
             except Exception as e:
                 validation_errors.append(f"Issue {idx}: {str(e)}")
 

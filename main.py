@@ -4,6 +4,7 @@ Provides a REST API endpoint to predict Actual_Time_Spent_hrs for JIRA issues.
 """
 
 import os
+import sys
 import pickle
 from typing import List
 import pandas as pd
@@ -30,6 +31,21 @@ def to_dict(pydantic_model):
         return dict(pydantic_model)
 
 
+def get_script_directory():
+    """
+    Get the directory where the script is located.
+    Handles cases where __file__ might not be defined.
+    """
+    if hasattr(sys, "frozen"):
+        # PyInstaller or similar
+        return os.path.dirname(sys.executable)
+    elif "__file__" in globals():
+        return os.path.dirname(os.path.abspath(__file__))
+    else:
+        # Fallback to current working directory
+        return os.getcwd()
+
+
 def load_model():
     """
     Load the trained model and preprocessing components.
@@ -39,7 +55,7 @@ def load_model():
     global model_data
 
     # Get the directory where this script is located
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    script_dir = get_script_directory()
 
     # Try loading from single file first
     jira_model_path = os.path.join(script_dir, "jira_model.pkl")
@@ -52,14 +68,14 @@ def load_model():
                 key in model_data
                 for key in ["model", "scaler", "label_encoders", "feature_columns"]
             ):
-                print(f"✓ Loaded model from {jira_model_path}")
+                print(f"[OK] Loaded model from {jira_model_path}")
                 return model_data
             else:
                 print(
-                    "⚠ jira_model.pkl exists but has unexpected structure, trying saved_models/"
+                    "[WARN] jira_model.pkl exists but has unexpected structure, trying saved_models/"
                 )
         except Exception as e:
-            print(f"⚠ Error loading jira_model.pkl: {e}, trying saved_models/")
+            print(f"[WARN] Error loading jira_model.pkl: {e}, trying saved_models/")
 
     # Try loading from saved_models directory
     saved_models_dir = os.path.join(script_dir, "saved_models")
@@ -71,14 +87,24 @@ def load_model():
                 model = pickle.load(f)
 
             scaler_path = os.path.join(saved_models_dir, "scaler.pkl")
+            if not os.path.exists(scaler_path):
+                raise FileNotFoundError(f"Scaler file not found: {scaler_path}")
             with open(scaler_path, "rb") as f:
                 scaler = pickle.load(f)
 
             label_encoders_path = os.path.join(saved_models_dir, "label_encoders.pkl")
+            if not os.path.exists(label_encoders_path):
+                raise FileNotFoundError(
+                    f"Label encoders file not found: {label_encoders_path}"
+                )
             with open(label_encoders_path, "rb") as f:
                 label_encoders = pickle.load(f)
 
             feature_columns_path = os.path.join(saved_models_dir, "feature_columns.pkl")
+            if not os.path.exists(feature_columns_path):
+                raise FileNotFoundError(
+                    f"Feature columns file not found: {feature_columns_path}"
+                )
             with open(feature_columns_path, "rb") as f:
                 feature_columns = pickle.load(f)
 
@@ -88,12 +114,14 @@ def load_model():
                 "label_encoders": label_encoders,
                 "feature_columns": feature_columns,
             }
-            print(f"✓ Loaded model from {saved_models_dir}/")
+            print(f"[OK] Loaded model from {saved_models_dir}/")
             return model_data
-        except Exception as e:
+        except FileNotFoundError as e:
             raise FileNotFoundError(
                 f"Model files found in saved_models/ but error loading them: {e}"
             )
+        except Exception as e:
+            raise RuntimeError(f"Error loading model files from saved_models/: {e}")
 
     # If we get here, no model files were found
     raise FileNotFoundError(
@@ -110,11 +138,11 @@ async def lifespan(app: FastAPI):
     """Load model on startup."""
     try:
         load_model()
-        print("✓ Model loaded successfully")
+        print("[OK] Model loaded successfully")
         print(f"  Current working directory: {os.getcwd()}")
-        print(f"  Script directory: {os.path.dirname(os.path.abspath(__file__))}")
+        print(f"  Script directory: {get_script_directory()}")
     except Exception as e:
-        error_msg = f"✗ Error loading model: {e}"
+        error_msg = f"[ERROR] Error loading model: {e}"
         print(error_msg)
         import traceback
 
